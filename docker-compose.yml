@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  hr-system:
+    build: .
+    container_name: hr-system-app
+    ports:
+      - "4443:4443"
+    volumes:
+      # Maps the backend folder so the database file (hr-system.db) stays on your NAS
+      - ./backend/py:/app/backend/py
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=your-secret-key-here

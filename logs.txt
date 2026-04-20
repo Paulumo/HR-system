@@ -1,0 +1,109 @@
+============================================================
+HR System - Change & Activity Log
+============================================================
+
+[2026-04-07] Initial Security Review
+-------------------------------------
+File reviewed: hr-system0407.html (~435 lines, single HTML file)
+
+SECURITY FINDINGS:
+  [CRITICAL] Real PII hardcoded in source (names, ID cards, phones, birthdays, emergency contacts)
+             - Violates Taiwan Personal Data Protection Act
+  [CRITICAL] Plain text passwords stored in JS array (password:"1234")
+  [CRITICAL] XSS - innerHTML used with unescaped user input (reason, name, dept fields)
+  [CRITICAL] Client-side only authorization - `CU` variable can be modified in browser console
+  [CRITICAL] No server-side approval enforcement on workflow
+
+  [MEDIUM]   No data persistence - all state lost on page reload
+  [MEDIUM]   No input validation (negative hours, empty fields)
+  [MEDIUM]   No CSRF protection, no session management
+
+  [MINOR]    Hardcoded constants (VP_ID, GM_ID, HOURLY_BASE)
+  [MINOR]    No HTTPS enforcement
+  [MINOR]    No rate limiting on login
+
+ASSESSMENT:
+  - Functionally complete for ~20 person company
+  - Feature coverage: clock in/out, leave, OT, schedule, approval, comp time - all good
+  - Architecture: pure client-side, no backend - NOT safe for production use
+
+RECOMMENDATIONS (phased):
+  Phase 1 (must-fix): Remove PII, add backend auth, hash passwords, XSS protection, data persistence
+  Phase 2 (architecture): Backend API, rate limiting, audit log, HTTPS
+  Phase 3 (features): Leave balance tracking, export/backup, notifications, delegation
+
+STATUS: Open - awaiting user direction on next steps.
+
+[2026-04-07] Project Context & Architecture Discussion
+-------------------------------------------------------
+SITUATION:
+  - HR created the prototype, passed it to Paul for productionizing
+  - Solo dev: Paul (beginner, some JS/Node.js + Python experience)
+  - Company uses Synology NAS in main office
+  - Hangar employees not on same WiFi cannot reach NAS (LAN-only issue)
+  - Need remote access for employees outside main office
+
+DISCUSSION:
+  - PII (Personally Identifiable Information) definition clarified
+  - Real PII in prototype violates Taiwan 個資法 (Personal Data Protection Act)
+  - Proposed architecture: Node.js + Express + SQLite backend on Synology NAS
+  - Remote access via Cloudflare Tunnel (free tier, no port forwarding, HTTPS included)
+  - SQLite is single-file DB, perfect for ~30 users, no Docker needed for DB
+
+QUESTIONS FOR IT (pending response):
+  1. Is Docker / Container Manager installed and available on the NAS?
+  2. Is there a database available (MariaDB/PostgreSQL), or can we run one?
+  3. Can we expose container ports so a Node.js app can be reached on the NAS?
+
+PLAN:
+  - Wait for IT answers before starting build
+  - Stack preference: Node.js + Express + SQLite (backend), keep HR prototype UI (refactored for safety)
+  - Cloudflare Tunnel for remote access (Docker on NAS)
+
+STATUS: Blocked on IT responses.
+
+[2026-04-07] Backend API — Phase 1 Complete
+---------------------------------------------
+DECISION: Switched from Node.js to Python/Flask (sqlite3 built-in, no native module issues on Windows)
+
+FILES CREATED:
+  backend/py/app.py      — Full Flask API (all routes)
+  backend/py/db.py       — SQLite schema, seed data (25 users, 6 shifts)
+  backend/py/auth.py     — Auth helpers (approval chain, require_auth)
+
+API ENDPOINTS:
+  POST /api/auth/login  — login (bcrypt password check, session cookie)
+  POST /api/auth/logout — logout
+  GET  /api/auth/me     — check current session
+  POST /api/attendance/clock-in   — clock in with late detection
+  POST /api/attendance/clock-out  — clock out with OT calculation
+  GET  /api/attendance/my
+  POST /api/leaves              — submit leave request
+  GET  /api/leaves/my
+  GET  /api/leaves/pending      — approval queue
+  POST /api/leaves/<id>/approve
+  POST /api/leaves/<id>/reject
+  POST /api/supplements         — missed punch request
+  GET  /api/supplements/pending
+  POST/REJECT as above
+  POST /api/overtime            — OT request with validation
+  GET  /api/overtime/pending
+  POST/REJECT as above
+  GET  /api/comp/my             — comp time balance
+  GET  /api/schedule/month/<y>/<m>
+  PUT  /api/schedule/<eid>/<dt>  (manager/admin only)
+  GET  /api/shifts
+  GET  /api/admin/users          (admin only)
+  PUT  /api/admin/users/<uid>
+
+SERVERS STATUS:
+  - Flask API running on port 3000, health check confirmed
+  - Login working, bcrypt verified (no password hash exposure)
+  - Database seeded with 25 employees + 6 shifts
+
+TODO:
+  - Refactor frontend to call API instead of using in-memory JS data
+  - Add rate limiting to login endpoint
+  - Schedule validation endpoint (server-side)
+  - Cloudflare Tunnel setup (pending IT confirmation)
+

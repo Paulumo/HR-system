@@ -1,0 +1,308 @@
+// ═══════════════════ i18n ═══════════════════
+let LANG = 'zh';
+const T = {
+  sysName:{zh:'HR 人資管理系統',en:'HR Management System'},sysNameSub:{zh:'Human Resources Portal',en:'Human Resources Portal'},
+  login:{zh:'員工登入',en:'Employee Login'},accountLabel:{zh:'帳號（員工編號）',en:'Account (Employee ID)'},accountPH:{zh:'請輸入員工編號',en:'Enter employee ID'},passwordLabel:{zh:'密碼',en:'Password'},passwordPH:{zh:'預設密碼 1234',en:'Default: 1234'},loginBtn:{zh:'登 入',en:'Sign In'},loginErr:{zh:'帳號或密碼錯誤',en:'Invalid credentials'},
+  rAdmin:{zh:'🛡️ 管理員',en:'🛡️ Admin'},rManager:{zh:'👑 主管',en:'👑 Manager'},rEmployee:{zh:'👤 員工',en:'👤 Employee'},
+  nDash:{zh:'總覽',en:'Dashboard'},nAttend:{zh:'出勤',en:'Attendance'},nClock:{zh:'打卡',en:'Clock'},nSupp:{zh:'補打卡申請',en:'Missed Punch'},nLeave:{zh:'請假申請',en:'Leave Request'},nOT:{zh:'加班申請',en:'OT Request'},
+  nWorkflow:{zh:'工作流程',en:'Workflow'},nWfLeave:{zh:'假單審核',en:'Leave Approval'},nWfSupp:{zh:'補卡審核',en:'Punch Approval'},nWfOT:{zh:'加班審核',en:'OT Approval'},
+  nComp:{zh:'補休管理',en:'Comp Time'},nSchedule:{zh:'班表管理',en:'Schedule'},
+  date:{zh:'日期',en:'Date'},clockIn:{zh:'上班',en:'In'},clockOut:{zh:'下班',en:'Out'},overtime:{zh:'加班',en:'OT'},status:{zh:'狀態',en:'Status'},
+  pending:{zh:'待審核',en:'Pending'},approved:{zh:'已核准',en:'Approved'},rejected:{zh:'已駁回',en:'Rejected'},approve:{zh:'核准',en:'Approve'},reject:{zh:'駁回',en:'Reject'},cancel:{zh:'取消',en:'Cancel'},save:{zh:'儲存',en:'Save'},submit:{zh:'送出',en:'Submit'},add:{zh:'新增',en:'Add'},
+  ltAnnual:{zh:'特休',en:'Annual'},ltSick:{zh:'病假',en:'Sick'},ltPersonal:{zh:'事假',en:'Personal'},ltComp:{zh:'補休',en:'Comp'},ltMarriage:{zh:'婚假',en:'Marriage'},ltFuneral:{zh:'喪假',en:'Funeral'},
+  shDay:{zh:'日班',en:'Day'},shEve:{zh:'晚班',en:'Evening'},shNight:{zh:'夜班',en:'Night'},shOff:{zh:'休假',en:'Rest'},shRegOff:{zh:'例假',en:'Reg Off'},shNat:{zh:'國定假日',en:'Holiday'},
+  shDayS:{zh:'日',en:'D'},shEveS:{zh:'晚',en:'E'},shNightS:{zh:'夜',en:'N'},shOffS:{zh:'休',en:'R'},shRegS:{zh:'例',en:'O'},shNatS:{zh:'國',en:'H'},
+  hello:{zh:'你好，',en:'Hello, '},attendance:{zh:'出勤',en:'Attend.'},otHours:{zh:'加班時數',en:'OT Hours'},compBalance:{zh:'補休餘額',en:'Comp Bal.'},pendingItems:{zh:'待審核',en:'Pending'},
+  noRecord:{zh:'尚無紀錄',en:'No records'},actions:{zh:'操作',en:'Actions'},reason:{zh:'事由',en:'Reason'},hours:{zh:'時數',en:'Hours'},logout:{zh:'🚪 登出',en:'🚪 Sign Out'},
+  earned:{zh:'取得',en:'Earned'},used:{zh:'已用',en:'Used'},available:{zh:'可用',en:'Available'},
+  wfMyTurn:{zh:'待我簽核',en:'My Turn'},wfDone:{zh:'已完成',en:'Done'},noPending:{zh:'無待審核 🎉',en:'All clear 🎉'},
+  btnClockIn:{zh:'上班打卡',en:'🟢 Clock In'},btnClockOut:{zh:'下班打卡',en:'🔴 Clock Out'},
+  leaveType:{zh:'假別',en:'Type'},startDate:{zh:'開始日期',en:'Start'},endDate:{zh:'結束日期',en:'End'},leaveReason:{zh:'請假事由',en:'Reason'},
+  suppIn:{zh:'補上班',en:'In'},suppOut:{zh:'補下班',en:'Out'},suppBoth:{zh:'補上下班',en:'Both'},suppReason:{zh:'忘記打卡原因',en:'Reason'},
+  otDate:{zh:'加班日期',en:'OT Date'},otHrs:{zh:'申請時數',en:'Hours'},otChoice:{zh:'補償方式',en:'Compensation'},otComp:{zh:'換補休',en:'Comp Time'},
+  totalEarned:{zh:'累計獲得',en:'Earned'},totalUsed:{zh:'已使用',en:'Used'},monthStats:{zh:'本月統計',en:'Stats'},
+  employee:{zh:'員工',en:'Employee'},editSched:{zh:'編輯班表',en:'Edit'},cancelEdit:{zh:'取消',en:'Cancel'},validateSave:{zh:'✅ 儲存',en:'✅ Save'},
+  shDay:{zh:'日班',en:'Day'},shEvening:{zh:'晚班',en:'Evening'},shNight:{zh:'夜班',en:'Night'},shOff:{zh:'休假',en:'Rest'},shRegOff:{zh:'例假',en:'Reg Off'},shNational:{zh:'國定假日',en:'Holiday'},
+  dow:{zh:["日","一","二","三","四","五","六"],en:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]},
+};
+function t(k){return T[k]?T[k][LANG]||T[k].zh||k:k}
+function toggleLang(){LANG=LANG==='zh'?'en':'zh';if(CU)showApp();else renderLogin()}
+
+// ═══════════════════ Safe HTML ═══════════════════
+// Escape user content to prevent XSS
+function esc(s){
+  if(s==null) return '';
+  const d=document.createElement('div');d.textContent=s;return d.innerHTML;
+}
+function fmtT(d){return d.toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false})}
+function fmtD(s){if(!s)return'';const d=new Date(s);return`${d.getMonth()+1}/${d.getDate()}`}
+function $(id){return document.getElementById(id)}
+const TD=new Date(),TDS=TD.toISOString().split("T")[0];
+function getDIM(y,m){return new Date(y,m+1,0).getDate()}
+function getDow(y,m,d){return T.dow[LANG][new Date(y,m,d).getDay()]}
+
+// ═══════════════════ State ═══════════════════
+let CU=null, clockRecs=[], leaveReqs=[], supplRecs=[], otRecs=[], compRecs=[], shifts=[], schedData={}, schM, schY, editMode=false;
+let clkTimer=null;
+
+// ═══════════════════ LOGIN ═══════════════════
+function renderLogin(){
+  $("loginPage").innerHTML=`<div class="login-wrap-inner"><div class="login-logo"><div class="login-logo-icon">🚁</div><h1>${t('sysName')}</h1><p>${t('sysNameSub')}</p></div><div class="login-card"><div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="lang-toggle" onclick="toggleLang()">${LANG==='zh'?'EN':'中文'}</button></div><h2>${t('login')}</h2><div id="loginError" class="login-error"><span id="loginErrorMsg"></span></div><div class="form-group"><label class="form-label">${t('accountLabel')}</label><input id="loginUser" class="form-input" placeholder="${t('accountPH')}"></div><div class="form-group"><label class="form-label">${t('passwordLabel')}</label><input id="loginPass" type="password" class="form-input" placeholder="${t('passwordPH')}"></div><button id="loginBtn" class="btn btn-primary btn-full" disabled>${t('loginBtn')}</button></div><p class="login-footer">© 2026 HR System v2.0</p></div>`;
+  $("loginUser").addEventListener("input",chkL);
+  $("loginPass").addEventListener("input",chkL);
+  $("loginUser").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
+  $("loginPass").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
+  $("loginBtn").addEventListener("click",doLogin);
+}
+function chkL(){$("loginBtn").disabled=!$("loginUser").value||!$("loginPass").value}
+async function doLogin(){
+  const u=$("loginUser").value.trim(),p=$("loginPass").value;
+  try{
+    const data=await Auth.login(u,p);
+    CU=data.user;
+    $("loginError").classList.remove("show");
+    clockRecs=[];leaveReqs=[];supplRecs=[];otRecs=[];compRecs=[];
+    schM=TD.getMonth();schY=TD.getFullYear();
+    loadAll().then(()=>showApp());
+  }catch(e){
+    $("loginError").classList.add("show");
+    $("loginErrorMsg").textContent=e.message||t('loginErr');
+  }
+}
+
+async function loadAll(){
+  const [a,l,s,o,c,sh]=await Promise.all([
+    Attendance.my(),Leaves.my(),Supplements.my(),OT.my(),Comp.my(),Schedule.shifts()
+  ]);
+  clockRecs=a.records||[];leaveReqs=l.requests||[];supplRecs=s.records||[];
+  otRecs=o.records||[];compRecs=c.records||[];shifts=sh.shifts||[];
+}
+
+async function doLogout(){
+  CU=null;
+  if(clkTimer)clearInterval(clkTimer);
+  await Auth.logout();
+  $("app").classList.remove("active");
+  $("loginPage").style.display="";
+  renderLogin();
+}
+
+// ═══════════════════ APP SHELL ═══════════════════
+function showApp(){
+  $("loginPage").style.display="none";
+  $("app").classList.add("active");
+  $("app").innerHTML=`
+  <div class="topbar"><div class="topbar-left"><div class="topbar-logo">🚁</div><div class="topbar-title"><h3>${t('sysName')}</h3><small>${t('sysNameSub')}</small></div></div><div class="topbar-right"><button class="lang-toggle" onclick="toggleLang()">${LANG==='zh'?'EN':'中文'}</button><div class="user-menu-btn" onclick="toggleDropdown()"><div><div class="name">${esc(CU.name_zh)}</div><div class="sub">${esc(CU.dept)} · ${esc(CU.title||'')}</div></div><span style="color:var(--gray-400);font-size:10px;margin-left:4px">▼</span><div id="userDD" class="user-dropdown"><div class="user-dropdown-info">${t('account')}：<span class="mono">${esc(CU.username)}</span></div><button class="logout-btn" onclick="doLogout()">${t('logout')}</button></div></div></div></div>
+  <div class="layout"><div id="sidebar" class="sidebar"><div class="sidebar-inner"><div id="navBtns"></div></div></div><div class="main"><div class="page-title" id="pgTitle"></div>
+  <div id="pg-dashboard" class="page"></div><div id="pg-clock" class="page"></div><div id="pg-leave" class="page"></div><div id="pg-wf-leave" class="page"></div><div id="pg-wf-supp" class="page"></div><div id="pg-wf-ot" class="page"></div><div id="pg-comp" class="page"></div><div id="pg-schedule" class="page"></div>
+  </div></div>`;
+  buildNav();
+  nav("dashboard");
+  if(clkTimer)clearInterval(clkTimer);
+  clkTimer=setInterval(tick,1000);
+  tick();
+  document.addEventListener("click",e=>{if(!e.target.closest(".user-menu-btn")){const dd=$("userDD");if(dd)dd.classList.remove("show")}});
+}
+
+function buildNav(){
+  let h='';
+  h+=`<button class="nav-btn" data-t="dashboard" onclick="nav('dashboard')"><span class="icon">📊</span>${t('nDash')}</button>`;
+  h+=`<button class="nav-group-btn open" onclick="toggleNav()"><span class="icon">⏱</span>${t('nAttend')}<span class="arrow">▼</span></button>`;
+  h+=`<div class="nav-sub open">`;
+  h+=`<button class="nav-btn" data-t="clock" onclick="nav('clock')"><span class="icon">🕐</span>${t('nClock')}</button>`;
+  h+=`<button class="nav-btn" data-t="leave" onclick="nav('leave')"><span class="icon">📋</span>${t('nLeave')}</button>`;
+  h+=`<button class="nav-btn" data-t="comp" onclick="nav('comp')"><span class="icon">🕐</span>${t('nComp')}</button>`;
+  h+=`<button class="nav-btn" data-t="schedule" onclick="nav('schedule')"><span class="icon">📅</span>${t('nSchedule')}</button>`;
+  h+=`</div>`;
+  // Workflow section
+  const plv=pendFor('leave'),pso=pendFor('suppl')+pendFor('ot'),ptot=plv+pso;
+  h+=`<button class="nav-group-btn" id="wfGrp" onclick="toggleWF()"><span class="icon">📑</span>${t('nWorkflow')}${ptot>0?`<span class="nav-badge">${ptot}</span>`:''}<span class="arrow">▶</span></button>`;
+  h+=`<div class="nav-sub" id="wfSub">`;
+  h+=`<button class="nav-btn" data-t="wf-leave" onclick="nav('wf-leave')"><span class="icon">✅</span>${t('nWfLeave')}${plv?`<span class="nav-badge">${plv}</span>`:''}</button>`;
+  h+=`<button class="nav-btn" data-t="wf-supp" onclick="nav('wf-supp')"><span class="icon">🔍</span>${t('nWfSupp')}</button>`;
+  h+=`<button class="nav-btn" data-t="wf-ot" onclick="nav('wf-ot')"><span class="icon">💵</span>${t('nWfOT')}</button>`;
+  h+=`</div>`;
+  $("navBtns").innerHTML=h;
+}
+
+function pendFor(type){
+  if(type==='leave')return leaveReqs.filter(r=>r.status==='pending').length;
+  return supplRecs.filter(r=>r.status==='pending').length+otRecs.filter(r=>r.status==='pending').length;
+}
+
+function toggleNav(){
+  const sub=document.querySelector(".nav-sub.open");
+  if(sub)sub.classList.toggle("open");
+}
+function toggleWF(){$("wfSub").classList.toggle("open");document.getElementById("wfGrp").classList.toggle("open")}
+function toggleDropdown(){$("userDD").classList.toggle("show")}
+
+const PAGES={dashboard:'rDash',clock:'rClock',leave:'rLeave',"wf-leave":'rWfLv',"wf-supp":'rWfSp',"wf-ot":'rWfOt',comp:'rComp',schedule:'rSched'};
+const PAGE_TITLES=()=>({dashboard:`📊 ${t('nDash')}`,clock:`🕐 ${t('nClock')}`,leave:`📋 ${t('nLeave')}`,"wf-leave":`✅ ${t('nWfLeave')}`,"wf-supp":`🔍 ${t('nWfSupp')}`,"wf-ot":`💵 ${t('nWfOT')}`,comp:`🕐 ${t('nComp')}`,schedule:`📅 ${t('nSchedule')}`});
+
+async function nav(id){
+  // Load pending approvals data
+  if(id.startsWith('wf-')&&!pendFor(id.replace('wf-','').replace('leave','leave').replace('supp','suppl').replace('ot','ot'))){
+    try{
+      if(id==='wf-leave')await Leaves.pending().then(d=>{leaveReqs=[...d.myTurn,...d.myPending,...d.history]});
+      if(id==='wf-supp')await Supplements.pending().then(d=>{supplRecs=[...d.myTurn,...d.myPending,...d.history]});
+      if(id==='wf-ot')await OT.pending().then(d=>{otRecs=[...d.myTurn,...d.myPending,...d.history]});
+    }catch(e){console.warn(e)}
+  }
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+  const el=$(`pg-${id}`);if(el)el.classList.add("active");
+  const btn=document.querySelector(`.nav-btn[data-t="${id}"]`);if(btn)btn.classList.add("active");
+  $("pgTitle").textContent=PAGE_TITLES()[id]||"";
+  const fn=PAGES[id];if(fn&&window[fn])window[fn](id);
+}
+async function refresh(){const a=document.querySelector(".page.active");if(a)nav(a.id.replace("pg-",""));buildNav()}
+function tick(){
+  const n=new Date();
+  document.querySelectorAll(".js-time").forEach(e=>e.textContent=fmtT(n));
+}
+
+// ═══════════════════ DASHBOARD ═══════════════════
+function rDash(){
+  const totOt=clockRecs.reduce((s,r)=>s+(r.overtime||0),0);
+  const ca=compRecs.reduce((s,r)=>s+((r.hours||0)-(r.used||0)),0);
+  $("pg-dashboard").innerHTML=`<div class="greeting"><div class="greeting-left"><div class="date js-date"></div><h2>${t('hello')}${esc(CU.name_zh)}</h2></div><div class="greeting-right"><div class="greeting-time js-time"></div></div></div><div class="stats-grid stats-grid-4">${stat("📅",t('attendance'),clockRecs.length+"d","#2563EB")}${stat("⏰",t('otHours'),totOt.toFixed(1)+"h","#F59E0B")}${stat("💎",t('compBalance'),ca+"h","#10B981")}${stat("📋",t('pendingItems'),pendFor('leave')+t('items'),"#8B5CF6")}</div>...`;
+  tick();
+}
+
+// ═══════════════════ CLOCK ═══════════════════
+function rClock(){
+  const mc=clockRecs.slice(0,30);
+  $("pg-clock").innerHTML=`<div class="clock-hero"><div class="clock-time js-time"></div><div class="js-date" style="font-size:15px;color:var(--gray-500);margin-top:8px"></div><div class="clock-buttons"><button class="btn btn-green" style="padding:14px 40px;font-size:16px" onclick="doCI()">${t('btnClockIn')}</button><button class="btn btn-red" style="padding:14px 40px;font-size:16px" onclick="doCO()">${t('btnClockOut')}</button></div></div><div class="card"><div class="card-header">${t('date')} / ${t('clockIn')} / ${t('clockOut')} / ${t('overtime')}</div><div class="overflow-auto"><table><thead><tr><th>${t('date')}</th><th>${t('clockIn')}</th><th>${t('clockOut')}</th><th>${t('overtime')}</th><th>${t('status')}</th></tr></thead><tbody>${mc.length===0?`<tr><td colspan="5" class="card-empty">${t('noRecord')}</td></tr>`:mc.map(r=>`<tr><td>${r.date}</td><td class="mono">${r.clock_in||r.clockIn||"—"}</td><td class="mono">${r.clock_out||r.clockOut||"—"}</td><td class="mono">${r.overtime||"-"}</td><td>${(r.status||r.status||'normal')}</td></tr>`).join("")}</tbody></table></div></div>`;
+  tick();
+}
+
+async function doCI(){
+  try{
+    const d=await Attendance.clockIn();
+    clockRecs.unshift({id:d.time,date:TDS,clock_in:d.time,clock_out:null,overtime:0,status:d.status});
+    refresh();
+  }catch(e){alert(e.message)}
+}
+
+async function doCO(){
+  try{
+    const d=await Attendance.clockOut();
+    // Update existing record
+    const today=clockRecs.find(r=>r.date===TDS);
+    if(today){today.clock_out=d.time;today.overtime=d.overtime;}
+    refresh();
+  }catch(e){alert(e.message)}
+}
+
+// ═══════════════════ LEAVE ═══════════════════
+function rLeave(id){
+  if(id==='leave'){
+    const ml=leaveReqs.filter(r=>r.status!=='pending'||true); // all my leaves
+    $("pg-leave").innerHTML=`<div class="card"><div class="card-body"><h3 style="font-size:16px;font-weight:700;margin-bottom:20px">📝 ${t('add')}</h3><div class="form-grid"><div><label class="form-label">${t('leaveType')}</label><select id="lvType" class="form-input">${['annual','sick','personal','comp','marriage','funeral'].map(lt=>`<option value="${lt}">${t('lt'+lt.charAt(0).toUpperCase()+lt.slice(1))||lt}</option>`).join("")}</select></div><div><label class="form-label">${t('hours')}</label><input id="lvH" type="number" value="8" class="form-input"></div><div><label class="form-label">${t('startDate')}</label><input id="lvSt" type="date" class="form-input"></div><div><label class="form-label">${t('endDate')}</label><input id="lvEn" type="date" class="form-input"></div><div class="form-full"><label class="form-label">${t('reason')}</label><textarea id="lvR" class="form-input" rows="2" placeholder="${t('leaveReason')}"></textarea></div></div><button class="btn btn-primary mt-4" onclick="subLv()">${t('submit')}</button></div></div><div class="card"><div class="card-header">${t('date')} / ${t('status')}</div>${ml.length===0?`<div class="card-empty">${t('noRecord')}</div>`:`<div class="overflow-auto"><table><thead><tr><th>${t('leaveType')}</th><th>${t('date')}</th><th>${t('hours')}</th><th>${t('reason')}</th><th>${t('status')}</th></tr></thead><tbody>${ml.map(r=>`<tr><td>${esc(r.leave_type)}</td><td>${fmtD(r.start_date)}${r.end_date!==r.start_date?" ~ "+fmtD(r.end_date):""}</td><td class="mono">${r.hours}h</td><td>${esc(r.reason||'')}</td><td>${(r.status)}</td></tr>`).join("")}</tbody></table></div>`}</div>`;
+  } else {
+    renderWF('wf-leave','nWfLeave',leaveReqs,'leave');
+  }
+}
+
+async function subLv(){
+  const tp=$("lvType").value,h=+$("lvH").value,s=$("lvSt").value,e=$("lvEn").value,r=$("lvR").value;
+  if(!s||!r)return alert('Missing fields');
+  await Leaves.submit({leave_type:tp,start_date:s,end_date:e||s,hours:h,reason:r});
+  leaveReqs=[]; // reload
+  await Leaves.my().then(d=>leaveReqs=d.requests||[]);
+  nav("leave");
+}
+
+// ═══════════════════ WORKFLOW ═══════════════════
+function renderWF(pgId,title,records,rtype){
+  const myTurn=records.filter(r=>r.my_turn); // TODO: server marks these
+  const history=records.filter(r=>r.status!=='pending');
+
+  let h='';
+  if(myTurn.length){
+    h+=`<div class="card"><div class="card-header">⏳ ${t('wfMyTurn')} <span class="nav-badge">${myTurn.length}</span></div>`;
+    // TODO: show approval items
+    h+=`</div>`;
+  }
+  if(history.length){
+    h+=`<div class="card"><div class="card-header">${t('wfDone')}</div>`;
+    history.forEach(r=>{h+=`<div class="review-item"><div class="review-info"><h4 style="font-size:13px">${esc(r.leave_type||'')} · ${fmtD(r.start_date||r.date||'')} ${r.hours||''}h</h4></div><div>${r.status}</div></div>`});
+    h+=`</div>`;
+  }
+  if(!myTurn.length&&!history.length)h+=`<div class="card"><div class="card-empty">${t('noPending')}</div></div>`;
+  $(`pg-${pgId}`).innerHTML=h;
+}
+
+async function rWfLv(){
+  try{const d=await Leaves.pending();renderWF('wf-leave','nWfLeave',[...d.myTurn,...d.myPending,...d.history],'leave')}
+  catch(e){console.error(e)}
+}
+async function rWfSp(){
+  try{const d=await Supplements.pending();$("pg-wf-supp").innerHTML=historyHTML([...d.myTurn,...d.myPending,...d.history])}
+  catch(e){console.error(e)}
+}
+async function rWfOt(){
+  try{const d=await OT.pending();$("pg-wf-ot").innerHTML=historyHTML([...d.myTurn,...d.myPending,...d.history])}
+  catch(e){console.error(e)}
+}
+
+function historyHTML(records){
+  const myTurn=records.filter(r=>r.status==='pending');
+  const history=records.filter(r=>r.status!=='pending');
+  let h='';
+  if(history.length){
+    h+=`<div class="card"><div class="card-header">${t('wfDone')}</div>`;
+    history.forEach(r=>{h+=`<div class="review-item"><div class="review-info"><h4 style="font-size:13px">${esc(r.reason||'')} ${r.date||''} ${r.hours||''}h</h4></div><div>${r.status}</div></div>`});
+    h+=`</div>`;
+  }
+  if(!myTurn.length&&!history.length)h+=`<div class="card"><div class="card-empty">${t('noPending')}</div></div>`;
+  return h;
+}
+
+// ═══════════════════ COMP TIME ═══════════════════
+function rComp(){
+  const e=compRecs.reduce((s,r)=>s+(r.hours||0),0),u=compRecs.reduce((s,r)=>s+(r.used||0),0);
+  $("pg-comp").innerHTML=`<div class="stats-grid stats-grid-3">${stat("📥",t('totalEarned'),e+"h","#2563EB")}${stat("📤",t('totalUsed'),u+"h","#F59E0B")}${stat("💎",t('available'),(e-u)+"h","#10B981")}</div><div class="card"><div class="card-header">${t('earnDate')} / ${t('earned')}</div>${compRecs.length===0?`<div class="card-empty">${t('noRecord')}</div>`:`<div class="overflow-auto"><table><thead><tr><th>${t('earnDate')}</th><th>${t('earned')}</th><th>${t('used')}</th><th>${t('available')}</th></tr></thead><tbody>${compRecs.map(r=>`<tr><td>${r.earned_date||r.earnedDate||'—'}</td><td class="mono">${r.hours}h</td><td class="mono">${r.used}h</td><td class="mono">${r.hours-r.used}h</td></tr>`).join("")}</tbody></table></div>`}</div>`;
+}
+
+// ═══════════════════ SCHEDULE ═══════════════════
+async function rSched(){
+  try{
+    const y=schY||TD.getFullYear(),m=schM!==undefined?schM:TD.getMonth();
+    const d=await Schedule.month(y,m);
+    shifts=d.shifts||[];
+    schedData=d.schedule||{};
+    schY=d.year;schM=d.month;
+    const dim=d.daysInMonth||getDIM(schY,schM+1);
+    const emps=d.employees||[];
+
+    let hd=`<tr><th class="sticky" style="min-width:90px">${t('employee')}</th>`;
+    for(let i=0;i<dim;i++){
+      const dow=getDow(schY,schM,i+1);
+      hd+=`<th style="text-align:center;padding:6px 2px"><div class="mono" style="font-size:13px">${i+1}</div><div style="font-size:10px">${dow}</div></th>`;
+    }
+    hd+="</tr>";
+
+    let bd="";
+    emps.forEach(emp=>{
+      bd+=`<tr><td class="sticky" style="font-weight:600;font-size:12px">${esc(emp.name_zh)}</td>`;
+      for(let i=0;i<dim;i++){
+        const s=(schedData[emp.id]||{})[i+1]||'day';
+        const sh=shifts.find(x=>x.id===s)||shifts[0]||{};
+        bd+=`<td style="padding:2px;text-align:center"><div class="sched-cell" style="background:${sh.color||'#999'}22;color:${sh.color||'#999'}">${sh.short||s}</div></td>`;
+      }
+      bd+="</tr>";
+    });
+
+    $("pg-schedule").innerHTML=`<div class="sched-header"><div class="sched-nav"><button onclick="schP()">◀</button><span>${schY}/${schM+1}</span><button onclick="schN()">▶</button></div></div><div class="card"><div class="sched-table"><table><thead>${hd}</thead><tbody>${bd}</tbody></table></div></div><div class="card"><div class="card-body"><div style="font-weight:700;font-size:14px;margin-bottom:12px">${t('monthStats')}</div><div class="legend">${shifts.map(sh=>`<span><span class="legend-dot" style="background:${sh.color}"></span>${esc(sh.label)}${sh.time?' ('+sh.time+')':''}</span>`).join("")}</div></div></div>`;
+  }catch(e){console.error(e)}
+}
+function schP(){if(schM===0){schM=11;schY--}else schM--;nav("schedule")}
+function schN(){if(schM===11){schM=0;schY++}else schM++;nav("schedule")}
+
+// ═══════════════════ Helpers ═══════════════════
+function stat(i,l,v,c){return`<div class="stat-card"><div class="stat-icon" style="background:${c}12">${i}</div><div><div class="stat-label">${l}</div><div class="stat-value">${v}</div></div></div>`}
+
+// ═══════════════════ BOOT ═══════════════════
+renderLogin();
