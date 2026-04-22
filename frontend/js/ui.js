@@ -351,6 +351,86 @@ async function confirmClockOut(callback) {
 }
 
 async function doQuickCO(){ confirmClockOut(() => Attendance.clockOut()); }
+
+function rClock(){
+  const tr=clockRecs.find(r=>r.date===TDS);
+  const ciD=tr&&tr.clock_in?'disabled':'';
+  const coD=!tr||!tr.clock_in||tr.clock_out?'disabled':'';
+  $("pg-clock").innerHTML=`<div class="clock-hero"><div class="clock-time js-time"></div><div class="js-date" style="font-size:15px;color:var(--gray-500);margin-top:8px"></div><div class="clock-buttons" onclick="event.stopPropagation()"><button class="btn btn-green" style="padding:14px 40px;font-size:16px" onclick="doCI()" ${ciD}>${t('btnClockIn')}</button><button class="btn btn-red" style="padding:14px 40px;font-size:16px" onclick="doCO()" ${coD}>${t('btnClockOut')}</button></div></div><div class="card"><div class="card-header">${t('attendance')}</div><div class="overflow-auto"><table><thead><tr><th>${t('date')}</th><th>${t('clockIn')}</th><th>${t('clockOut')}</th><th>${t('overtime')}</th><th>${t('status')}</th></tr></thead><tbody>${clockRecs.length===0?`<tr><td colspan="5" class="card-empty">${t('noRecord')}</td></tr>`:clockRecs.map(r=>`<tr><td>${r.date}</td><td class="mono">${r.clock_in||"—"}</td><td class="mono">${r.clock_out||"—"}</td><td class="mono">${r.overtime||"-"}</td><td>${badge(r.status, r.reject_reason)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  tick();
+}
+
+function openManualPunch(){
+  const now = new Date();
+  const curTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  let h=`<div class="modal-overlay" id="manualPunchModal"><div class="modal-content" style="max-width:400px"><h3>🕒 ${t('UTC+8 CALIBRATE')||'UTC+8 CALIBRATE'}</h3>
+    <div class="form-grid">
+      <div class="form-full"><label class="form-label">${t('date')}</label><input id="mpDate" type="date" class="form-input" value="${TDS}"></div>
+      <div class="form-full"><label class="form-label">${t('time')||'Time'}</label><input id="mpTime" type="time" class="form-input" value="${curTime}"></div>
+      <div class="form-full"><label class="form-label">${t('type')||'Type'}</label>
+        <div style="display:flex;gap:12px">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="mpType" value="in" checked> A</label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="mpType" value="out"> B</label>
+        </div>
+      </div>
+    </div>
+    <div class="mt-6" style="display:flex;gap:12px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="$('manualPunchModal').remove()">${t('cancel')}</button>
+      <button class="btn btn-primary" onclick="submitManualPunch()">${t('submit')}</button>
+    </div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend',h);
+}
+
+async function submitManualPunch(){
+  const date = $('mpDate').value;
+  const time = $('mpTime').value;
+  const type = document.querySelector('input[name="mpType"]:checked').value;
+  if(!date || !time) return alert("Please fill in all fields");
+  
+  try {
+    const data = {
+      date,
+      clock_in: type === 'in' ? time : undefined,
+      clock_out: type === 'out' ? time : undefined
+    };
+    await Attendance.manual(data);
+    $('manualPunchModal').remove();
+    alert("Record updated successfully");
+    await loadAll(); refresh();
+  } catch(e){ alert(e.message) }
+}
+function openDevDashboard() {
+  const h = `<div class="modal-overlay" id="devDashboardModal">
+    <div class="modal-content" style="max-width:300px">
+      <h3>DEV DASHBOARD</h3>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input id="devPass" type="password" class="form-input" placeholder="Enter password">
+      </div>
+      <div class="mt-6" style="display:flex;gap:12px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="$('devDashboardModal').remove()">${t('cancel')}</button>
+        <button class="btn btn-primary" onclick="checkDevPass()">${t('confirm')}</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', h);
+  $("devPass").addEventListener("keydown",e=>{if(e.key==="Enter")checkDevPass()});
+  $("devPass").focus();
+}
+
+function checkDevPass() {
+  const p = $("devPass").value;
+  if (p === 'NOPASSWORD') {
+    $("devDashboardModal").remove();
+    openManualPunch();
+  } else {
+    alert("Incorrect Password");
+  }
+}
+window.openDevDashboard = openDevDashboard; window.checkDevPass = checkDevPass;
+window.openManualPunch = openManualPunch; window.submitManualPunch = submitManualPunch;
+async function doCI(){try{await Attendance.clockIn();await loadAll();refresh()}catch(e){alert(e.message)}}
 async function doCO(){ confirmClockOut(() => Attendance.clockOut()); }
 
 async function rLeave(){
