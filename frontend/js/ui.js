@@ -21,7 +21,9 @@ const T={
   dow:{zh:["日","一","二","三","四","五","六"],en:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]},
   logout:{zh:'🚪 登出',en:'🚪 Sign Out'},
   account:{zh:'帳號',en:'Account'},identity:{zh:'身份',en:'Role'},
-  statusNormal:{zh:'正常',en:'Normal'},statusLate:{zh:'遲到',en:'Late to work'},statusEarly:{zh:'早退',en:'Leave Early'},statusSupp:{zh:'補打卡',en:'Missed Punch'}
+  statusNormal:{zh:'正常',en:'Normal'},statusLate:{zh:'遲到',en:'Late to work'},statusEarly:{zh:'早退',en:'Leave Early'},statusSupp:{zh:'補打卡',en:'Missed Punch'},
+  earlyCOWarn:{zh:'尚未到下班時間，確定要早退打卡嗎？',en:'It is not clock-out time yet. Are you sure you want to clock out early?'},
+  confirmCO:{zh:'確認下班',en:'Confirm Clock Out'}
 };
 function t(k){return T[k]?T[k][LANG]||T[k].zh||k:k}
 function toggleLang(){LANG=LANG==='zh'?'en':'zh';if(CU)showApp();else renderLogin()}
@@ -211,7 +213,7 @@ function rDash(){
   const ciD=tr&&tr.clock_in?'disabled':'';
   const coD=!tr||!tr.clock_in||tr.clock_out?'disabled':'';
   const ts=CU.today_shift;
-  const shiftInfo=ts?`${t('nSchedule')}: ${esc(ts.shift_name)} (${ts.shift_id})` : t('noRecord');
+  const shiftInfo=ts?`${esc(ts.label)} ${ts.time?`(${ts.time})`:''}` : t('noRecord');
 
   $("pg-dashboard").innerHTML=`
     <!-- Part 1: Welcome & Shift -->
@@ -219,7 +221,7 @@ function rDash(){
       <div class="welcome-main">
         <div class="date js-date"></div>
         <h2>${t('hello')}${esc(CU.name_zh)}</h2>
-        <div class="today-shift"><span>📅</span> ${shiftInfo}</div>
+        <div class="today-shift"><span>📅</span> ${t('nSchedule')}: ${shiftInfo}</div>
       </div>
       <div class="welcome-time">
         <div class="greeting-time js-time"></div>
@@ -303,88 +305,53 @@ function rDash(){
 }
 
 async function doQuickCI(){ try{await Attendance.clockIn();await loadAll();refresh()}catch(e){alert(e.message)} }
-async function doQuickCO(){ try{await Attendance.clockOut();await loadAll();refresh()}catch(e){alert(e.message)} }
-
-function rClock(){
-  const tr=clockRecs.find(r=>r.date===TDS);
-  const ciD=tr&&tr.clock_in?'disabled':'';
-  const coD=!tr||!tr.clock_in||tr.clock_out?'disabled':'';
-  $("pg-clock").innerHTML=`<div class="clock-hero"><div class="clock-time js-time"></div><div class="js-date" style="font-size:15px;color:var(--gray-500);margin-top:8px"></div><div class="clock-buttons" onclick="event.stopPropagation()"><button class="btn btn-green" style="padding:14px 40px;font-size:16px" onclick="doCI()" ${ciD}>${t('btnClockIn')}</button><button class="btn btn-red" style="padding:14px 40px;font-size:16px" onclick="doCO()" ${coD}>${t('btnClockOut')}</button></div></div><div class="card"><div class="card-header">${t('attendance')}</div><div class="overflow-auto"><table><thead><tr><th>${t('date')}</th><th>${t('clockIn')}</th><th>${t('clockOut')}</th><th>${t('overtime')}</th><th>${t('status')}</th></tr></thead><tbody>${clockRecs.length===0?`<tr><td colspan="5" class="card-empty">${t('noRecord')}</td></tr>`:clockRecs.map(r=>`<tr><td>${r.date}</td><td class="mono">${r.clock_in||"—"}</td><td class="mono">${r.clock_out||"—"}</td><td class="mono">${r.overtime||"-"}</td><td>${badge(r.status, r.reject_reason)}</td></tr>`).join("")}</tbody></table></div></div>`;
-  tick();
-}
-
-function openManualPunch(){
+async function confirmClockOut(callback) {
+  const ts = CU.today_shift;
   const now = new Date();
-  const curTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  let h=`<div class="modal-overlay" id="manualPunchModal"><div class="modal-content" style="max-width:400px"><h3>🕒 ${t('UTC+8 CALIBRATE')||'UTC+8 CALIBRATE'}</h3>
-    <div class="form-grid">
-      <div class="form-full"><label class="form-label">${t('date')}</label><input id="mpDate" type="date" class="form-input" value="${TDS}"></div>
-      <div class="form-full"><label class="form-label">${t('time')||'Time'}</label><input id="mpTime" type="time" class="form-input" value="${curTime}"></div>
-      <div class="form-full"><label class="form-label">${t('type')||'Type'}</label>
-        <div style="display:flex;gap:12px">
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="mpType" value="in" checked> A</label>
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="mpType" value="out"> B</label>
+  let isEarly = false;
+
+  if (ts && ts.time && ts.time.includes('-')) {
+    try {
+      const endStr = ts.time.split('-')[1].trim();
+      const [eh, em] = endStr.split(':').map(Number);
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const schedMin = eh * 60 + em;
+      if (nowMin < schedMin - 5) isEarly = true;
+    } catch(e) { console.error("Early check error", e); }
+  }
+
+  if (isEarly) {
+    const h = `<div class="modal-overlay" id="earlyCOModal">
+      <div class="modal-content" style="max-width:400px; text-align:center;">
+        <div style="font-size:50px; margin-bottom:16px;">⚠️</div>
+        <h3 style="justify-content:center; margin-bottom:12px;">${t('confirmCO')}</h3>
+        <p style="color:var(--gray-500); line-height:1.5; margin-bottom:24px;">${t('earlyCOWarn')}</p>
+        <div style="display:flex; gap:12px; justify-content:center;">
+          <button class="btn btn-outline" style="flex:1" onclick="$('earlyCOModal').remove()">${t('cancel')}</button>
+          <button class="btn btn-red" style="flex:1" id="confirmCOBtn">${t('confirm')}</button>
         </div>
       </div>
-    </div>
-    <div class="mt-6" style="display:flex;gap:12px;justify-content:flex-end">
-      <button class="btn btn-outline" onclick="$('manualPunchModal').remove()">${t('cancel')}</button>
-      <button class="btn btn-primary" onclick="submitManualPunch()">${t('submit')}</button>
-    </div>
-  </div></div>`;
-  document.body.insertAdjacentHTML('beforeend',h);
-}
-
-async function submitManualPunch(){
-  const date = $('mpDate').value;
-  const time = $('mpTime').value;
-  const type = document.querySelector('input[name="mpType"]:checked').value;
-  if(!date || !time) return alert("Please fill in all fields");
-  
-  try {
-    const data = {
-      date,
-      clock_in: type === 'in' ? time : undefined,
-      clock_out: type === 'out' ? time : undefined
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', h);
+    $('confirmCOBtn').onclick = async () => {
+      $('earlyCOModal').remove();
+      try {
+        await callback();
+        await loadAll();
+        refresh();
+      } catch(e) { alert(e.message); }
     };
-    await Attendance.manual(data);
-    $('manualPunchModal').remove();
-    alert("Record updated successfully");
-    await loadAll(); refresh();
-  } catch(e){ alert(e.message) }
-}
-function openDevDashboard() {
-  const h = `<div class="modal-overlay" id="devDashboardModal">
-    <div class="modal-content" style="max-width:300px">
-      <h3>DEV DASHBOARD</h3>
-      <div class="form-group">
-        <label class="form-label">Password</label>
-        <input id="devPass" type="password" class="form-input" placeholder="Enter password">
-      </div>
-      <div class="mt-6" style="display:flex;gap:12px;justify-content:flex-end">
-        <button class="btn btn-outline" onclick="$('devDashboardModal').remove()">${t('cancel')}</button>
-        <button class="btn btn-primary" onclick="checkDevPass()">${t('confirm')}</button>
-      </div>
-    </div>
-  </div>`;
-  document.body.insertAdjacentHTML('beforeend', h);
-  $("devPass").addEventListener("keydown",e=>{if(e.key==="Enter")checkDevPass()});
-  $("devPass").focus();
-}
-
-function checkDevPass() {
-  const p = $("devPass").value;
-  if (p === 'NOPASSWORD') {
-    $("devDashboardModal").remove();
-    openManualPunch();
   } else {
-    alert("Incorrect Password");
+    try {
+      await callback();
+      await loadAll();
+      refresh();
+    } catch(e) { alert(e.message); }
   }
 }
-window.openDevDashboard = openDevDashboard; window.checkDevPass = checkDevPass;
-window.openManualPunch = openManualPunch; window.submitManualPunch = submitManualPunch;
-async function doCI(){try{await Attendance.clockIn();await loadAll();refresh()}catch(e){alert(e.message)}}
-async function doCO(){try{await Attendance.clockOut();await loadAll();refresh()}catch(e){alert(e.message)}}
+
+async function doQuickCO(){ confirmClockOut(() => Attendance.clockOut()); }
+async function doCO(){ confirmClockOut(() => Attendance.clockOut()); }
 
 async function rLeave(){
   $("pg-leave").innerHTML=`<div class="card"><div class="card-body"><h3 style="font-size:16px;font-weight:700;margin-bottom:20px">📝 ${t('addLeave')}</h3><div class="form-grid"><div><label class="form-label">${t('leaveType')}</label><select id="lvType" class="form-input">${['annual','sick','personal','comp','marriage','funeral'].map(lt=>`<option value="${lt}">${t('lt'+lt.charAt(0).toUpperCase()+lt.slice(1))||lt}</option>`).join("")}</select></div><div><label class="form-label">${t('hours')}</label><input id="lvH" type="number" value="8" class="form-input"></div><div><label class="form-label">${t('startDate')}</label><input id="lvSt" type="date" class="form-input"></div><div><label class="form-label">${t('endDate')}</label><input id="lvEn" type="date" class="form-input"></div><div class="form-full"><label class="form-label">${t('reason')}</label><textarea id="lvR" class="form-input" rows="2" placeholder="${t('leaveReason')}"></textarea></div></div><button class="btn btn-primary mt-4" onclick="subLv()">${t('submit')}</button></div></div><div class="card"><div class="card-header">${t('myLeaveRec')}</div><div class="overflow-auto"><table><thead><tr><th>${t('leaveType')}</th><th>${t('date')}</th><th>${t('hours')}</th><th>${t('status')}</th><th>${t('wfTitle')}</th></tr></thead><tbody>${leaveReqs.length===0?`<tr><td colspan="5" class="card-empty">${t('noRecord')}</td></tr>`:leaveReqs.map(r=>`<tr><td>${esc(r.leave_type)}</td><td>${fmtD(r.start_date)}${r.end_date!==r.start_date?" ~ "+fmtD(r.end_date):""}</td><td class="mono">${r.hours}h</td><td>${badge(r.status, r.reject_reason)}</td><td>${wfHTML(r)}</td></tr>`).join("")}</tbody></table></div></div>`;

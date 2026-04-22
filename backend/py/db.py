@@ -3,9 +3,10 @@ import sqlite3, bcrypt, os
 DB_PATH = os.path.join(os.path.dirname(__file__), 'hr-system.db')
 
 def make_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 def init_db():
@@ -41,7 +42,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     clock_in TEXT,
     clock_out TEXT,
     overtime REAL DEFAULT 0,
-    status TEXT DEFAULT 'normal' CHECK(status IN ('normal','late','supplement')),
+    status TEXT DEFAULT 'normal' CHECK(status IN ('normal','late','supplement','early')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(employee_id, date)
 );

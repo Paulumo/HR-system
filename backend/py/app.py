@@ -1,11 +1,22 @@
 import os, re, uuid, bcrypt
 from datetime import datetime, date
-from flask import Flask, request, session, jsonify, send_from_directory
+from flask import Flask, request, session, jsonify, send_from_directory, g
 from db import init_db, make_conn
 
 FRONTEND = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'frontend'))
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 app = Flask(__name__, static_folder=FRONTEND, static_url_path='/frontend')
+
+def get_db():
+    if 'db' not in g:
+        g.db = make_conn()
+    return g.db
+
+@app.teardown_appcontext
+def close_db(e=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 @app.route('/')
 def index():
@@ -41,16 +52,14 @@ def get_approval_chain(applicant_id, users):
     return final
 
 def add_wf_info(records, users, rtype):
-    db = make_conn()
+    db = get_db()
     ids = [r['id'] for r in records]
     if not ids:
-        db.close()
         for r in records: r['approval_chain'] = get_approval_chain(r['applicant_id'], users)
         return records
     ph = ','.join('?' * len(ids))
     rows = db.execute(f"SELECT request_id, COUNT(*) as cnt FROM approvals WHERE request_type = ? AND request_id IN ({ph}) GROUP BY request_id", [rtype] + ids).fetchall()
     amap = {r['request_id']: r['cnt'] for r in rows}
-    db.close()
     for r in records:
         r['approval_count'] = amap.get(r['id'], 0)
         r['approval_chain'] = get_approval_chain(r['applicant_id'], users)
@@ -69,9 +78,8 @@ def require_auth(fn):
     def wrapper(*a, **kw):
         uid = session.get('user_id')
         if not uid: return jsonify({'error': 'Not authenticated'}), 401
-        db = make_conn()
+        db = get_db()
         row = db.execute('SELECT * FROM users WHERE id = ?', [uid]).fetchone()
-        db.close()
         if not row: return jsonify({'error': 'Not authenticated'}), 401
         request.user = dict(row)
         return fn(*a, **kw)
@@ -82,7 +90,7 @@ def get_user_full_info(user_row):
     try:
         u = dict(user_row)
         u.pop('password_hash', None)
-        db = make_conn()
+        db = get_db()
         
         # Calculate Annual Leave Balance
         used_row = db.execute("SELECT SUM(hours) as s FROM leave_requests WHERE applicant_id = ? AND leave_type = 'annual' AND status = 'approved'", [u['id']]).fetchone()
@@ -115,10 +123,9 @@ def get_user_full_info(user_row):
         
         # Get today's shift
         today_iso = today.isoformat()
-        shift = db.execute("SELECT s.*, sh.name_zh as shift_name FROM schedules s JOIN shifts sh ON s.shift_id = sh.id WHERE s.employee_id = ? AND s.date = ?", [u['id'], today_iso]).fetchone()
+        shift = db.execute("SELECT sh.* FROM schedules s JOIN shifts sh ON s.shift_id = sh.id WHERE s.employee_id = ? AND s.date = ?", [u['id'], today_iso]).fetchone()
         u['today_shift'] = dict(shift) if shift else None
         
-        db.close()
         return u
     except Exception as e:
         print(f"Error in get_user_full_info: {e}")
@@ -131,11 +138,10 @@ def get_user_full_info(user_row):
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     data = request.json or {}
-    u, p = data.get('username','').strip(), data.get('password','')
-    db = make_conn()
-    row = db.execute('SELECT * FROM users WHERE username = ?', [u]).fetchone()
-    db.close()
-    if not row or not bcrypt.checkpw(p.encode(), row['password_hash'].encode()):
+    username, password = data.get('username','').strip(), data.get('password','')
+    db = get_db()
+    row = db.execute('SELECT * FROM users WHERE username = ?', [username]).fetchone()
+    if not row or not bcrypt.checkpw(password.encode(), row['password_hash'].encode()):
         return jsonify({'error': 'Invalid credentials'}), 401
     
     user = get_user_full_info(row)
@@ -152,20 +158,17 @@ def api_change_password():
     if not u or not old_p or not new_p:
         return jsonify({'error': 'All fields are required'}), 400
     
-    db = make_conn()
+    db = get_db()
     row = db.execute('SELECT * FROM users WHERE username = ?', [u]).fetchone()
     if not row:
-        db.close()
         return jsonify({'error': 'User not found'}), 404
     
     if not bcrypt.checkpw(old_p.encode(), row['password_hash'].encode()):
-        db.close()
         return jsonify({'error': 'Current password incorrect'}), 401
     
     new_hash = bcrypt.hashpw(new_p.encode(), bcrypt.gensalt()).decode()
     db.execute("UPDATE users SET password_hash = ? WHERE username = ?", [new_hash, u])
     db.commit()
-    db.close()
     return jsonify({'ok': True})
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -182,41 +185,40 @@ def api_me():
 @app.route('/api/attendance/my', methods=['GET'])
 @require_auth
 def att_my():
-    db = make_conn()
+    db = get_db()
     rows = db.execute('SELECT * FROM attendance WHERE employee_id = ? ORDER BY date DESC LIMIT 31', [request.user['id']]).fetchall()
-    db.close()
     return jsonify({'records': [dict(r) for r in rows]})
 
 @app.route('/api/attendance/manual', methods=['POST'])
 @require_auth
 def api_att_manual():
+    db = get_db()
     try:
         d = request.json or {}
         dt = d.get('date')
         if not dt: return jsonify({'error': 'Date is required'}), 400
-        
+
         ci = d.get('clock_in')
         co = d.get('clock_out')
-        
-        db = make_conn()
+
         existing = db.execute('SELECT * FROM attendance WHERE employee_id=? AND date=?', [request.user['id'], dt]).fetchone()
-        
+
         # Use existing if not provided in request
         final_in = ci if ci is not None else (existing['clock_in'] if existing else None)
         final_out = co if co is not None else (existing['clock_out'] if existing else None)
-        
+
         # Default status for manual override
         status = 'supplement'
         ot = 0
-        
+
         sched = db.execute("SELECT s.* FROM schedules sc JOIN shifts s ON sc.shift_id = s.id WHERE sc.employee_id = ? AND sc.date = ?", [request.user['id'], dt]).fetchone()
-        
+
         if sched and sched['time'] and '-' in sched['time']:
             try:
                 parts = sched['time'].split('-')
                 if len(parts) == 2:
                     start_str, end_str = parts
-                    
+
                     # Late check (only if we are updating clock_in or it was already there)
                     if final_in:
                         sh, sm = map(int, start_str.split(':'))
@@ -225,14 +227,14 @@ def api_att_manual():
                             status = 'late'
                         else:
                             status = 'normal'
-                    
+
                     # OT check (only if we have clock_out)
                     if final_out:
                         eh, em = map(int, end_str.split(':'))
                         oh, om = map(int, final_out.split(':'))
                         out_min = oh * 60 + om
                         sched_min = eh * 60 + em
-                        
+
                         if out_min > (sched_min + 30):
                             ot = round((out_min - sched_min) / 60, 1)
             except Exception as e:
@@ -244,9 +246,8 @@ def api_att_manual():
         else:
             db.execute("INSERT INTO attendance (id, employee_id, date, clock_in, clock_out, overtime, status) VALUES (?,?,?,?,?,?,?)",
                        [gen_id('C'), request.user['id'], dt, final_in, final_out, ot, status])
-        
+
         db.commit()
-        db.close()
         return jsonify({'ok': True})
     except Exception as e:
         print(f"Manual punch error: {e}")
@@ -258,10 +259,10 @@ def clock_in():
     dt = date.today().isoformat()
     now = datetime.now()
     t = now.strftime('%H:%M')
-    db = make_conn()
+    db = get_db()
     existing = db.execute('SELECT id FROM attendance WHERE employee_id=? AND date=?', [request.user['id'], dt]).fetchone()
     if existing:
-        db.close(); return jsonify({'error': 'Already clocked in'}), 400
+        return jsonify({'error': 'Already clocked in'}), 400
     
     sched = db.execute("SELECT s.* FROM schedules sc JOIN shifts s ON sc.shift_id = s.id WHERE sc.employee_id = ? AND sc.date = ?", [request.user['id'], dt]).fetchone()
     status = 'normal'
@@ -275,7 +276,7 @@ def clock_in():
         except: pass
     
     db.execute("INSERT INTO attendance (id, employee_id, date, clock_in, status) VALUES (?,?,?,?,?)", [gen_id('C'), request.user['id'], dt, t, status])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True, 'time': t})
 
 @app.route('/api/attendance/clock-out', methods=['POST'])
@@ -284,10 +285,10 @@ def clock_out():
     dt = date.today().isoformat()
     now = datetime.now()
     t = now.strftime('%H:%M')
-    db = make_conn()
+    db = get_db()
     rec = db.execute('SELECT * FROM attendance WHERE employee_id=? AND date=?', [request.user['id'], dt]).fetchone()
     if not rec or rec['clock_out']:
-        db.close(); return jsonify({'error': 'No active clock-in found'}), 400
+        return jsonify({'error': 'No active clock-in found'}), 400
     
     ot = 0
     status = rec['status']
@@ -309,7 +310,7 @@ def clock_out():
         except: pass
             
     db.execute("UPDATE attendance SET clock_out = ?, overtime = ?, status = ? WHERE id = ?", [t, ot, status, rec['id']])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True, 'time': t, 'overtime': ot})
 
 # ---------- Workflows (Generic) ----------
@@ -344,26 +345,25 @@ def _reject(db, req_id, user, users, reason, table):
 @app.route('/api/leaves/my', methods=['GET'])
 @require_auth
 def leave_my():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     rows = db.execute('SELECT * FROM leave_requests WHERE applicant_id = ? ORDER BY created_at DESC', [request.user['id']]).fetchall()
-    db.close()
     return jsonify({'requests': add_wf_info([dict(r) for r in rows], users, 'leave')})
 
 @app.route('/api/leaves', methods=['POST'])
 @require_auth
 def leave_submit():
     d = request.json or {}
-    db = make_conn()
+    db = get_db()
     db.execute("INSERT INTO leave_requests (id, applicant_id, leave_type, start_date, end_date, hours, reason) VALUES (?,?,?,?,?,?,?)",
                [gen_id('L'), request.user['id'], d.get('leave_type'), d.get('start_date'), d.get('end_date'), d.get('hours',8), d.get('reason')])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/leaves/pending', methods=['GET'])
 @require_auth
 def leave_pending():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     pending = db.execute("SELECT lr.*, u.name_zh, u.dept FROM leave_requests lr JOIN users u ON lr.applicant_id = u.id WHERE lr.status = 'pending' ORDER BY lr.created_at ASC").fetchall()
     prec = add_wf_info([dict(r) for r in pending], users, 'leave')
@@ -378,13 +378,12 @@ def leave_pending():
     else:
         hist_rows = db.execute("SELECT lr.*, u.name_zh FROM leave_requests lr JOIN users u ON lr.applicant_id = u.id WHERE lr.status != 'pending' AND lr.applicant_id = ? ORDER BY lr.created_at DESC LIMIT 50", [request.user['id']]).fetchall()
     
-    db.close()
     return jsonify({'myTurn': my_turn, 'myPending': mine, 'history': [dict(h) for h in hist_rows]})
 
 @app.route('/api/leaves/<req_id>/approve', methods=['POST'])
 @require_auth
 def leave_approve(req_id):
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     
     def on_app(r, db):
@@ -404,40 +403,39 @@ def leave_approve(req_id):
                 needed -= take
 
     res, code = _approve(db, req_id, request.user, users, 'leave', 'leave_requests', on_app)
-    db.close(); return jsonify(res), code
+    return jsonify(res), code
 
 @app.route('/api/leaves/<req_id>/reject', methods=['POST'])
 @require_auth
 def leave_reject(req_id):
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     res, code = _reject(db, req_id, request.user, users, (request.json or {}).get('reject_reason',''), 'leave_requests')
-    db.close(); return jsonify(res), code
+    return jsonify(res), code
 
 # ---------- Supplement ----------
 @app.route('/api/supplements/my', methods=['GET'])
 @require_auth
 def supp_my():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     rows = db.execute('SELECT * FROM supplement_requests WHERE applicant_id = ? ORDER BY created_at DESC', [request.user['id']]).fetchall()
-    db.close()
     return jsonify({'records': add_wf_info([dict(r) for r in rows], users, 'supplement')})
 
 @app.route('/api/supplements', methods=['POST'])
 @require_auth
 def supp_submit():
     d = request.json or {}
-    db = make_conn()
+    db = get_db()
     db.execute("INSERT INTO supplement_requests (id, applicant_id, date, type, clock_in, clock_out, reason) VALUES (?,?,?,?,?,?,?)",
                [gen_id('SP'), request.user['id'], d.get('date'), d.get('type'), d.get('clock_in',''), d.get('clock_out',''), d.get('reason')])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/supplements/pending', methods=['GET'])
 @require_auth
 def supp_pending():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     pending = db.execute("SELECT sr.*, u.name_zh, u.dept FROM supplement_requests sr JOIN users u ON sr.applicant_id = u.id WHERE sr.status = 'pending' ORDER BY sr.created_at ASC").fetchall()
     prec = add_wf_info([dict(r) for r in pending], users, 'supplement')
@@ -452,44 +450,42 @@ def supp_pending():
     else:
         hist_rows = db.execute("SELECT sr.*, u.name_zh FROM supplement_requests sr JOIN users u ON sr.applicant_id = u.id WHERE sr.status != 'pending' AND sr.applicant_id = ? ORDER BY sr.created_at DESC LIMIT 50", [request.user['id']]).fetchall()
     
-    db.close()
     return jsonify({'myTurn': my_turn, 'myPending': mine, 'history': [dict(h) for h in hist_rows]})
 
 @app.route('/api/supplements/<req_id>/approve', methods=['POST'])
 @require_auth
 def supp_approve(req_id):
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     def on_app(r, db):
         db.execute("INSERT INTO attendance (id, employee_id, date, clock_in, clock_out, overtime, status) VALUES (?,?,?,?,?,0,'supplement') ON CONFLICT(employee_id, date) DO UPDATE SET clock_in=excluded.clock_in, clock_out=excluded.clock_out, status='supplement'",
                    [gen_id('C'), r['applicant_id'], r['date'], r['clock_in'] or '09:00', r['clock_out'] or None])
     res, code = _approve(db, req_id, request.user, users, 'supplement', 'supplement_requests', on_app)
-    db.close(); return jsonify(res), code
+    return jsonify(res), code
 
 # ---------- Overtime ----------
 @app.route('/api/overtime/my', methods=['GET'])
 @require_auth
 def ot_my():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     rows = db.execute('SELECT * FROM ot_requests WHERE applicant_id = ? ORDER BY created_at DESC', [request.user['id']]).fetchall()
-    db.close()
     return jsonify({'records': add_wf_info([dict(r) for r in rows], users, 'ot')})
 
 @app.route('/api/overtime', methods=['POST'])
 @require_auth
 def ot_submit():
     d = request.json or {}
-    db = make_conn()
+    db = get_db()
     db.execute("INSERT INTO ot_requests (id, applicant_id, date, hours, comp_type, reason) VALUES (?,?,?,?,?,?)",
                [gen_id('OT'), request.user['id'], d.get('date'), d.get('hours'), d.get('comp_type'), d.get('reason')])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/overtime/pending', methods=['GET'])
 @require_auth
 def ot_pending():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     pending = db.execute("SELECT o.*, u.name_zh, u.dept FROM ot_requests o JOIN users u ON o.applicant_id = u.id WHERE o.status = 'pending' ORDER BY o.created_at ASC").fetchall()
     prec = add_wf_info([dict(r) for r in pending], users, 'ot')
@@ -504,36 +500,34 @@ def ot_pending():
     else:
         hist_rows = db.execute("SELECT o.*, u.name_zh FROM ot_requests o JOIN users u ON o.applicant_id = u.id WHERE o.status != 'pending' AND o.applicant_id = ? ORDER BY o.created_at DESC LIMIT 50", [request.user['id']]).fetchall()
     
-    db.close()
     return jsonify({'myTurn': my_turn, 'myPending': mine, 'history': [dict(h) for h in hist_rows]})
 
 @app.route('/api/overtime/<req_id>/approve', methods=['POST'])
 @require_auth
 def ot_approve(req_id):
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     def on_app(r, db):
         if r['comp_type'] == 'comp':
             db.execute("INSERT INTO comp_time (id, employee_id, earned_date, hours, source, expiry) VALUES (?,?,?,?,'Overtime Comp',?)",
                        [gen_id('CT'), r['applicant_id'], r['date'], r['hours'], '2026-12-31'])
     res, code = _approve(db, req_id, request.user, users, 'ot', 'ot_requests', on_app)
-    db.close(); return jsonify(res), code
+    return jsonify(res), code
 
 # ---------- Comp ----------
 @app.route('/api/comp/my', methods=['GET'])
 @require_auth
 def comp_my():
-    db = make_conn()
+    db = get_db()
     recs = db.execute('SELECT * FROM comp_time WHERE employee_id = ? ORDER BY earned_date DESC', [request.user['id']]).fetchall()
     total = db.execute('SELECT SUM(hours - used) as s FROM comp_time WHERE employee_id = ? AND status = "available"', [request.user['id']]).fetchone()['s'] or 0
-    db.close()
     return jsonify({'records': [dict(r) for r in recs], 'available': total, 'totalEarned': sum(r['hours'] for r in recs), 'totalUsed': sum(r['used'] for r in recs)})
 
 # ---------- Schedule ----------
 @app.route('/api/schedule/month/<y>/<m>', methods=['GET'])
 @require_auth
 def sched_month(y, m):
-    db = make_conn()
+    db = get_db()
     # Admins see everyone, others see only their department
     if request.user['role'] == 'admin':
         emps = db.execute('SELECT id, name_zh, name_en, dept, dept_en, role FROM users WHERE role != "admin" ORDER BY display_order, dept, name_zh').fetchall()
@@ -547,7 +541,6 @@ def sched_month(y, m):
         day = int(r['date'].split('-')[2])
         if eid not in s_map: s_map[eid] = {}
         s_map[eid][day] = r['shift_id']
-    db.close()
     import calendar
     dim = calendar.monthrange(int(y), int(m)+1)[1]
     return jsonify({
@@ -563,10 +556,10 @@ def sched_month(y, m):
 def users_reorder():
     if request.user['role'] != 'admin': return jsonify({'error': 'Forbidden'}), 403
     order = request.json.get('order', []) # List of user IDs
-    db = make_conn()
+    db = get_db()
     for i, uid in enumerate(order):
         db.execute("UPDATE users SET display_order = ? WHERE id = ?", [i, uid])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/health', methods=['GET'])
@@ -576,13 +569,12 @@ def api_health():
 @app.route('/api/schedule/<eid>/<dt>', methods=['PUT'])
 @require_auth
 def sched_update(eid, dt):
+    db = get_db()
     # Admin can do anything
     if request.user['role'] == 'admin':
         pass 
     else:
-        db = make_conn()
         target = db.execute("SELECT dept FROM users WHERE id = ?", [eid]).fetchone()
-        db.close()
         # Managers can edit anyone in their own department
         if request.user['role'] == 'manager' and target and target['dept'] == request.user['dept']:
             pass
@@ -590,20 +582,18 @@ def sched_update(eid, dt):
             return jsonify({'error': 'Permission denied'}), 403
     
     sid = (request.json or {}).get('shift_id')
-    db = make_conn()
     if sid is None:
         db.execute("DELETE FROM schedules WHERE employee_id = ? AND date = ?", [eid, dt])
     else:
         db.execute("INSERT INTO schedules (employee_id, date, shift_id) VALUES (?,?,?) ON CONFLICT(employee_id, date) DO UPDATE SET shift_id = excluded.shift_id", [eid, dt, sid])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/shifts', methods=['GET'])
 @require_auth
 def get_shifts():
-    db = make_conn()
+    db = get_db()
     rows = db.execute('SELECT * FROM shifts').fetchall()
-    db.close()
     return jsonify({'shifts': [dict(r) for r in rows]})
 
 # ---------- Admin Shift Management ----------
@@ -614,15 +604,13 @@ def admin_add_shift():
     d = request.json or {}
     sid, label, t, short, color, h = d.get('id'), d.get('label',''), d.get('time',''), d.get('short',''), d.get('color','#888'), d.get('hours',8)
     if not sid or not short: return jsonify({'error': 'Missing ID or Short name'}), 400
-    db = make_conn()
+    db = get_db()
     try:
         db.execute("INSERT INTO shifts (id, label, time, short, color, hours, is_work) VALUES (?,?,?,?,?,?,?)",
                    [sid, label, t, short, color, h, 1 if t else 0])
         db.commit()
     except Exception as e:
         return jsonify({'error': str(e)}), 400
-    finally:
-        db.close()
     return jsonify({'ok': True})
 
 @app.route('/api/admin/shifts/<sid>', methods=['PUT'])
@@ -631,24 +619,23 @@ def admin_edit_shift(sid):
     if request.user['role'] != 'admin': return jsonify({'error': 'Forbidden'}), 403
     d = request.json or {}
     label, t, short, color, h = d.get('label',''), d.get('time',''), d.get('short',''), d.get('color','#888'), d.get('hours',8)
-    db = make_conn()
+    db = get_db()
     db.execute("UPDATE shifts SET label=?, time=?, short=?, color=?, hours=?, is_work=? WHERE id=?",
                [label, t, short, color, h, 1 if t else 0, sid])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/admin/shifts/<sid>', methods=['DELETE'])
 @require_auth
 def admin_del_shift(sid):
     if request.user['role'] != 'admin': return jsonify({'error': 'Forbidden'}), 403
-    db = make_conn()
+    db = get_db()
     # Check if shift is in use
     in_use = db.execute("SELECT 1 FROM schedules WHERE shift_id = ? LIMIT 1", [sid]).fetchone()
     if in_use:
-        db.close()
         return jsonify({'error': 'Cannot delete shift: It is currently in use in the schedule.'}), 400
     db.execute("DELETE FROM shifts WHERE id=?", [sid])
-    db.commit(); db.close()
+    db.commit()
     return jsonify({'ok': True})
 
 @app.route('/api/health', methods=['GET'])
@@ -656,9 +643,8 @@ def admin_del_shift(sid):
 @require_auth
 def admin_users():
     if request.user['role'] != 'admin': return jsonify({'error': 'Forbidden'}), 403
-    db = make_conn()
+    db = get_db()
     rows = db.execute('SELECT * FROM users').fetchall()
-    db.close()
     res = [dict(r) for r in rows]
     for u in res: u.pop('password_hash', None)
     return jsonify({'users': res})
@@ -666,7 +652,7 @@ def admin_users():
 @app.route('/api/workflows/counts', methods=['GET'])
 @require_auth
 def workflow_counts():
-    db = make_conn()
+    db = get_db()
     users = [dict(u) for u in db.execute('SELECT id, role, manager_id, name_zh FROM users').fetchall()]
     
     # helper to count my turn
@@ -680,7 +666,6 @@ def workflow_counts():
         'supplement': count_my_turn('supplement_requests', 'supplement'),
         'ot': count_my_turn('ot_requests', 'ot')
     }
-    db.close()
     return jsonify(counts)
 
 if __name__ == '__main__':
